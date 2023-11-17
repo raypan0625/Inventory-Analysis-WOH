@@ -1,10 +1,16 @@
 # WOH-WOS-Analysis
-* This is the calcualtion of "Weeks On Hand"/ "Weeks Of Supply" for the inventory analysis based on past sales, forecast, and monthly/weekly seasonality.  
-* Internally, most of the item level weeks on hand are simply calculated as total inventory divided by weekly sales. However, Amazon Innetwork/DI orders in batches (B2B) which might overstate our true sales speed. To smooth out our weekly sales numbers, we should calculate our true weekly demand.  
+* This is the calcualtion of "Weeks On Hand" / "Weeks Of Supply" (WOH/WOS) for the inventory analysis based on past sales, forecast, and monthly/weekly seasonality.  
 
 ## Description
+* Internally, most of the item level weeks on hand are simply calculated as total inventory divided by weekly sales. However, Amazon Innetwork/DI orders in batches (B2B) which might overstate our true sales speed. To smooth out our weekly sales numbers, we should calculate our true weekly demand.
+   - Non-AMZ DI_IN Weekly Sales: Last 12 weeks Non-AMZ_DI/IN weekly sales
+   - AMZ DI_IN Weekly Sales: Last 12 weeks actual AMZ portal weekly sales
+AMZ DI_IN Weekly Forecast: Next 12 weeks AMZ portal weekly forecast
+IMT/OIT Forecast: Next 12 weeks HM forecast weekly sales 
+OH_Days: Last 12 weeks number of days HM is on hand (>20pcs)
+OH: Current US On Hand Inventory
+OW: Current US On Water Inventory + Previous month planned but not yet shipped
 
-An in-depth paragraph about your project and overview of use.
 
 ## Getting Started
 
