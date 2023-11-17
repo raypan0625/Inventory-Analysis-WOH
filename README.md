@@ -58,6 +58,7 @@ This is linked to [Item-SKU Forecast](https://github.com/raypan0625/Item-SKU-For
 ## Other Measurements
 ### Estimated Next Ship Date & Estimated shipping qty at ship date
 These measurements provide a guideline for the estimated next ship date and next ship qty, making necessary preparation for next shipment. 
+
 *Lead time consideration: 1 month when shipping from China to US, 2 months when ship from other countries (Malaysia, India, etc.) to US*
 ### Estimated Next Reorder Date & Estimated Reorder qty at Reorder date
 These measurements provide a guideline for the estimated next reorder date and next reorder qty, making necessary preparation for factory negotiation.
