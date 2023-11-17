@@ -1,0 +1,1998 @@
+---
+title: "WOH new logic outdoor"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Reminder: check seasonality numbers, change forecast months, DNS date, import file names match, assortment TOTAL QTY name
+CLEAR ENVIRONMENT BEFORE RUNNING!!!
+
+
+
+```{r, warning=FALSE, messsage = FALSE}
+#Libraries
+library(readr)
+library(dplyr)
+library(readxl)
+library(scales)
+library(lubridate)
+library(writexl)
+```
+
+
+
+```{r,warning=FALSE, message = FALSE}
+#Import Files
+assortment <- read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/Outdoor Assortment 9.8.2023.xlsx", 
+     sheet = "Forecast by StockKey - PCS", 
+     skip = 3)
+# myfba <- read_csv("C:/Users/Yulin Pan/Desktop/woh calculation files/Yesterday Inventory (12).csv")%>%
+#   select(stockkey, `Pieces (C1) in Warehouse`)
+# pcs <- read_csv("C:/Users/Yulin Pan/Desktop/woh calculation files/HM OnHand by Location.csv")
+  # left_join(myfba, by=c("stockey" = "stockkey"))%>%
+  # mutate_at(c("Pieces (C1) in Warehouse"),~replace_na(.,0))%>%
+  # mutate(`HM on hand pcs_Noble house US warehouse` = `HM on hand pcs_Noble house US warehouse` - `Pieces (C1) in Warehouse`)
+pcs <- read_excel("C:/Users/Yulin Pan/Downloads/NH US 2023 HM Forecast & Shipping_Sep 2023.09.06.xlsx", sheet = "Outdoor Item Detail", skip = 3)%>%
+  select(Stockey, `HMNum 1`, `Sellable in USA QTY`, `Current On Water QTY`,`Current On Order QTY`, `2023 Sep Plan Ship`)%>%
+  rename(stockey = Stockey,
+        `HM on hand pcs_Noble house US warehouse` = `Sellable in USA QTY`,
+         `us onwaterqty` = `Current On Water QTY`,
+         `Pcs in shipping plan` = `2023 Sep Plan Ship`,
+         `us openqty` = `Current On Order QTY`)
+sales <- read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/sales6.10-9.1.xlsx")
+days <- read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/OH days 6.10-9.1.xlsx")
+oit <- read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/OIT Projection.xlsx")
+DI_List <- read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/AMZ DI List updates.xlsx")
+amzdata <- read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/amz9.11.xlsx")
+prod<-read_excel("C:/Users/Yulin Pan/Desktop/Productivity/Outdoor HM Productivity.xlsx")
+factory<-read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/Factory inventory list 20220815 (2).xlsx", 
+    sheet = "Stockey & Factory Summary")
+season = read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/Seasonality_out.xlsx")
+# pcsinsp = read_excel("C:/Users/Yulin Pan/Desktop/woh calculation files/pcsinsp.xlsx")
+cdf3<-read_excel("C:/Users/Yulin Pan/Desktop/48&12&4/Sep 2023/US Final Updated Forecast Sep 2023.xlsx", sheet = "Outdoor Stockey Forecast", skip = 1)%>%
+  rename(StockKey = StockKey, `2023 Final Total QTY` = `US Non DI Final QTY`)%>%
+  select(`StockKey`, `2023 Final Total QTY`)
+```
+
+Run above chunks manually, then run all chunks below
+Otherwise R maybe aborted
+```{r}
+week=as.numeric(strftime(floor_date(today(), 'month'), format = "%U"))+1
+```
+
+```{r}
+#Seasonality
+season = as.data.frame(season)
+
+# previous_month = sum(season[19:30,2])
+# forecast_month = sum(season[31:52,2])
+wksinfor = length(season[31:52,2])
+
+# midcnty = week(as.Date("2023-2-13"))
+# midcnny = week(as.Date("2023-3-13"))
+# midnoncnty = week(as.Date("2023-2-13"))
+# midnoncnny = week(as.Date("2023-6-12"))
+# JANTOJUN = sum(season[1:26,2])
+# JULTODEC = 1 - JANTOJUN
+DNS_date = as.Date("2023/8/1")
+```
+
+
+
+```{r}
+#Read From Assortment
+
+woh<-assortment %>%
+  select(Picture, stockkey, `HMNum 1`,`HMNum 2`,`HMNum 3`, `Product Name`,Tier,`New Category3`,`New Category3-2`,`First Receiving Date`,Unit,MP,`Latest Factory Name`, "Country of Factory"=`Representative Country of Factory`,`Units 40' HQ`,  `Last First Cost` )
+woh$`First Receiving Date` = as.Date(woh$`First Receiving Date`)
+
+`Sellable qty in USA` = rep(0,nrow(woh))
+`Current On Water` = rep(0,nrow(woh))
+`Pcs in shipping plan` = rep(0,nrow(woh))
+`On Order` = rep(0,nrow(woh))
+`Total Stock` = rep(0,nrow(woh))
+for (i in 1:nrow(pcs)){
+  n=which(woh$stockkey == pcs$stockey[i])
+  `Sellable qty in USA`[n] = pcs$`HM on hand pcs_Noble house US warehouse`[i]
+  `Current On Water`[n] = pcs$`us onwaterqty`[i]
+  `On Order`[n] = pcs$`us openqty`[i]
+}
+`Total Stock` = `Sellable qty in USA` + `Current On Water` + `On Order`
+
+for (i in 1:nrow(woh)){
+  n=which(woh$stockkey == pcs$stockey[i])
+  `Pcs in shipping plan`[n] = pcs$`Pcs in shipping plan`[i]
+}
+
+ # for (i in 1:nrow(woh)){
+ #   n=which(woh$`HMNum 1` == pcsinsp$`HMNum 1`[i])
+ #   `Pcs in shipping plan`[n] = pcsinsp$`Pcs in shipping plan`[i]
+ # }
+
+woh = cbind(woh,`Sellable qty in USA`, `Current On Water`,`Pcs in shipping plan`,`On Order`,`Total Stock`)
+woh$`Pcs in shipping plan`[which(is.na(woh$`Pcs in shipping plan`))]<-0
+
+for (i in 1:nrow(woh)){
+  if (woh$`Pcs in shipping plan`[i]>woh$`On Order`[i]){
+    woh$`Pcs in shipping plan`[i] = woh$`On Order`[i]
+  }
+}
+
+
+##Import "orange" columns
+#`Sellable qty in USA` = rep(0,nrow(woh))
+#`Current On Water` = rep(0,nrow(woh))
+#`Pcs in shipping plan` = rep(0,nrow(woh))
+#`On Order` = rep(0,nrow(woh))
+#`Total Stock` = rep(0,nrow(woh))
+#for (i in 1:nrow(woh)){
+#  n=which(woh$stockkey == assortment$stockkey[i])
+#  `Sellable qty in USA`[n] = assortment$Sellable[i]
+#  `Current On Water`[n] = assortment$`On water`[i]
+#  `Pcs in shipping plan`[n] = assortment$`Pcs in shipping plan`[i]
+#  `On Order`[n] = assortment$`On order`[i]
+#  `Total Stock`[n] = assortment$`TOTAL QTY`[i]
+#}
+
+`Sellable qty in USA $` = dollar_format()(c(woh$`Sellable qty in USA` * woh$`Last First Cost`))
+`Current On Water $` = dollar_format()(c(woh$`Current On Water` * woh$`Last First Cost`))
+`Pcs in shipping plan $` = dollar_format()(c(woh$`Pcs in shipping plan` * woh$`Last First Cost`))
+`On Order $` = dollar_format()(c(woh$`On Order` * woh$`Last First Cost`))
+`Total Stock $` = dollar_format()(c(woh$`Total Stock` * woh$`Last First Cost`))
+
+woh = cbind(woh,`Sellable qty in USA $`,`Current On Water $`, `Pcs in shipping plan $`, `On Order $`, `Total Stock $`)  
+
+
+
+#Import "white" column
+
+#Non-AMZ DI_IN
+sales <- sales[sales$Merch_AMAZON =="Non Amazon", ]
+sales<- sales %>%
+  group_by(`HM stockey`)%>%
+  summarise(pieces = sum(`HM pieces sold`))
+`Non-AMZ DI_IN`=rep(0,nrow(woh))
+
+
+`Non-AMZ DI_IN`=rep(0,nrow(woh))
+for (i in 1:nrow(sales)){
+  n=which(woh$stockkey == sales$`HM stockey`[i])
+  `Non-AMZ DI_IN`[n] = sales$pieces[i]
+}
+
+#OH Days
+`OH Days`=rep(0,nrow(woh))
+for (i in 1:nrow(days)){
+  n=which(woh$stockkey == days$Stockey[i])
+  `OH Days`[n] = days$OH_Days[i]
+}
+
+
+#OIT Weekly Forecast
+`OIT Weekly Forecast` = rep(0,nrow(woh))
+for (i in 1:nrow(oit)){
+  n=which(woh$stockkey == oit$stockkey[i])
+  `OIT Weekly Forecast`[n] = oit$Weekly[i]
+}
+
+
+#AMZ DI List
+`AMZ DI List` = rep("",nrow(woh))
+for (i in 1:nrow(DI_List)){
+  n=which(woh$stockkey == DI_List$Stockey[i])
+  `AMZ DI List`[n] = DI_List$`DI List`[i]
+}
+
+
+#AMZ data
+# `AMZ Sellable qty` = rep(0,nrow(woh))
+# `AMZ Open Purchase` = rep(0,nrow(woh))
+`Last 12 WKs Sales - AMZ` = rep(0,nrow(woh))
+`Next 12 WKs Sales - AMZ` = rep(0,nrow(woh))
+for (i in 1:nrow(amzdata)){
+  n=which(woh$stockkey == amzdata$Stockey[i])
+  # `AMZ Sellable qty`[n] = amzdata$`Sellable On Hand Units - HM Adjusted`[i]
+  # `AMZ Open Purchase`[n] = amzdata$`Open Purchase Order Quantity - HM Adjusted`[i]
+  `Last 12 WKs Sales - AMZ`[n] = amzdata$`Last 12 Week Weekly Sales - HM Adjusted`[i]
+  `Next 12 WKs Sales - AMZ`[n] = amzdata$`Next 12 Week Weekly Sales - HM Adjusted`[i]
+}
+
+#`AMZ Sellable qty`  = as.double(format(round(`AMZ Sellable qty`, 2), nsmall = 2))
+#`AMZ Open Purchase` = as.double(format(round(`AMZ Open Purchase`, 2), nsmall = 2))
+#`Last 12 WKs Sales - AMZ` = as.double(format(round(`Last 12 WKs Sales - AMZ`, 2), nsmall = 2))
+#`Next 12 WKs Sales - AMZ` = as.double(format(round(`Next 12 WKs Sales - AMZ`, 2), nsmall = 2))
+
+# `AMZ Sellable qty`  = as.double(`AMZ Sellable qty`)
+# `AMZ Open Purchase` = as.double(`AMZ Open Purchase`)
+`Last 12 WKs Sales - AMZ` = as.double(`Last 12 WKs Sales - AMZ`)
+`Next 12 WKs Sales - AMZ` = as.double(`Next 12 WKs Sales - AMZ`)
+`Last 12 WKs Sales - AMZ`[is.na(`Last 12 WKs Sales - AMZ`)]<-0
+`Next 12 WKs Sales - AMZ`[is.na(`Next 12 WKs Sales - AMZ`)]<-0
+
+woh = cbind(woh,`Non-AMZ DI_IN`, `OH Days`, `OIT Weekly Forecast`, `AMZ DI List`, `Last 12 WKs Sales - AMZ`,`Next 12 WKs Sales - AMZ`) 
+```
+
+```{r}
+season_previous<-season%>%
+  filter(
+    (orderweek >= week - 11 & orderweek < week) |
+    ((orderweek + 53 - week) %% 53 >= 41)
+  )%>%
+  group_by(C32)%>%
+  summarise(previous_month  = sum(Weekly_Weight))
+
+season_forecast<-season%>%
+  filter(
+    (orderweek >= week & orderweek <= week + 21) |
+    ((orderweek + 53 - week) %% 53 <= 21)
+  )%>%
+  group_by(C32)%>%
+  summarise(forecast_month  = sum(Weekly_Weight))
+
+woh_1<-woh%>%
+  select(stockkey, `New Category3`, `New Category3-2`)%>%
+  mutate(`New Category3-2` = toupper(`New Category3-2`))%>%
+  mutate(C32 = ifelse(`New Category3` == "CHRISTMAS DECORATION", "XMAS",ifelse(`New Category3` == "BEAN BAG", "Beanbag", `New Category3-2`)))%>%
+  mutate(C32 = ifelse(C32 %in% season$C32, C32, "Normal"))%>%
+  left_join(season_previous, by=c("C32"))%>%
+  left_join(season_forecast, by=c("C32"))%>%
+  select(stockkey, C32, previous_month, forecast_month)
+
+woh<-woh%>%
+  left_join(woh_1, by=c("stockkey"))
+```
+
+
+```{r,warning=FALSE}
+#Calculations
+
+#light blue columns
+#`Weekly Sales` = rep(0,nrow(woh))
+#`Weekly Sales_OOS` = rep(0,nrow(woh))
+#`Weekly Sales_SEA` = rep(0,nrow(woh))
+`Weekly Sales_OOS_SEA` = rep(0,nrow(woh))
+`Weekly Sales_Forecast` = rep(0,nrow(woh))
+#for (i in 1:nrow(woh)) {
+#  if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+#    `Weekly Sales`[i] = woh$`Non-AMZ DI_IN`[i] / 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] 
+#    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+#        `Weekly Sales_OOS`[i] = `Weekly Sales`[i]
+#        #`Weekly Sales_OOS_SEA`[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#    }
+#    else{
+#      if (woh$`OH Days`[i] < 30){
+#        `Weekly Sales_OOS`[i] = woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]
+#        #`Weekly Sales_OOS_SEA`[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#      }
+#      else{
+#        `Weekly Sales_OOS`[i] = woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + 0.3 * woh$`Last 12 WKs Sales - AMZ`
+#        #`Weekly Sales_OOS_SEA`[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#      }
+#    } 
+#    `Weekly Sales_SEA`[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + 0.3*woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#  }
+#  else{
+#    `Weekly Sales`[i] = woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i] 
+#    if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+#        `Weekly Sales_OOS`[i] = `Weekly Sales`[i]
+#        #`Weekly Sales_OOS_SEA`[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#    }
+#    else{
+#      if(woh$`OH Days`[i] < 30){
+#        `Weekly Sales_OOS`[i] = woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + woh$`Last 12 WKs Sales - AMZ`[i]
+#        #`Weekly Sales_OOS_SEA`[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#      }
+#      else{
+#        `Weekly Sales_OOS`[i] = woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + woh$`Last 12 WKs Sales - AMZ`[i]
+#        #`Weekly Sales_OOS_SEA`[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#      }
+#    }
+#    `Weekly Sales_SEA`[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i]) / woh$previous_month[i] * woh$forecast_month[i]
+#  }
+#}
+
+`Weekly Sales_OOS_SEA (Jan-Jun 2023)`<- rep("", nrow(woh))
+`Weekly Sales_OOS_SEA (Jul-Dec 2023)`<- rep("", nrow(woh))
+for (i in 1:nrow(woh)) {
+  if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        `Weekly Sales_OOS_SEA`[i] = ((woh$`Non-AMZ DI_IN`[i]  + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) / woh$previous_month[i] * woh$forecast_month[i])/wksinfor
+        #`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]  + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12 ) * 1.00 / previous_month * JANTOJUN)/25.86
+        #`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]  + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12 ) * 1.00 / previous_month * JULTODEC)/26.29
+    }
+    else{
+      if (woh$`OH Days`[i] < 30){
+        `Weekly Sales_OOS_SEA`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) / woh$previous_month[i] * woh$forecast_month[i])/wksinfor
+        #`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JANTOJUN)/25.86
+        #`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JULTODEC)/26.29
+      }
+      else{
+        `Weekly Sales_OOS_SEA`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) / woh$previous_month[i] * woh$forecast_month[i])/wksinfor
+        #`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) *1.00 / previous_month * JANTOJUN)/25.86
+        #`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i] * 12) *1.00 / previous_month * JULTODEC)/26.29
+      }
+    }
+  }
+  else{
+    if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        `Weekly Sales_OOS_SEA`[i] = ((woh$`Non-AMZ DI_IN`[i] + woh$`Last 12 WKs Sales - AMZ`[i] * 12) / woh$previous_month[i] * woh$forecast_month[i])/wksinfor
+        #`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i] + woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JANTOJUN)/25.86
+        #`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i] + woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JULTODEC)/26.29
+    }
+    else{
+      if(woh$`OH Days`[i] < 30){
+        `Weekly Sales_OOS_SEA`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12 + woh$`Last 12 WKs Sales - AMZ`[i] * 12) / woh$previous_month[i] * woh$forecast_month[i])/wksinfor
+        #`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12 + woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JANTOJUN)/25.86
+        #`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12 + woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JULTODEC)/26.29
+      }
+      else{
+        `Weekly Sales_OOS_SEA`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6  * 12 + woh$`Last 12 WKs Sales - AMZ`[i] * 12) / woh$previous_month[i] * woh$forecast_month[i])/wksinfor
+        #`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6  * 12 + woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JANTOJUN)/25.86
+        #`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] = ((woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6  * 12 + woh$`Last 12 WKs Sales - AMZ`[i] * 12) * 1.00 / previous_month * JULTODEC)/26.29
+      }
+    }
+  }
+}
+
+`Weekly Sales_OOS_SEA` = as.double(`Weekly Sales_OOS_SEA`)
+#`Weekly Sales_OOS_SEA (Jan-Jun 2023)` = as.double(`Weekly Sales_OOS_SEA (Jan-Jun 2023)`)
+#`Weekly Sales_OOS_SEA (Jul-Dec 2023)` = as.double(`Weekly Sales_OOS_SEA (Jul-Dec 2023)`)
+
+`Weekly Sales_Forecast` = rep(0,nrow(woh))
+for (i in 1:nrow(woh)) {
+  if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    `Weekly Sales_Forecast`[i] = 0.8 * woh$`OIT Weekly Forecast`[i] + 0.3 * woh$`Next 12 WKs Sales - AMZ`[i]
+  }
+  else{
+    `Weekly Sales_Forecast`[i] = 0.8 * woh$`OIT Weekly Forecast`[i] + woh$`Next 12 WKs Sales - AMZ`[i]
+  }
+}
+
+woh = cbind(woh,`Weekly Sales_OOS_SEA`, `Weekly Sales_Forecast`)
+
+#WOH = rep(0,nrow(woh))
+#WOH_OOS = rep(0,nrow(woh))
+#WOH_SEA = rep(0,nrow(woh))
+WOH_OOS_SEA = rep(0,nrow(woh))
+WOH_totalstock = rep(0,nrow(woh))
+WOS_totalstock = rep(0,nrow(woh))
+WOS = rep(0,nrow(woh))
+#for (i in 1:nrow(woh)) {
+#  if(woh$`Weekly Sales`[i] == 0){
+#    if(woh$`OH Days`[i] == 0){
+#      WOH[i] = "Out of Stock"
+#    }
+#    else{
+#      WOH[i] = "0 Weekly Sales"
+#    }
+#  }
+#  else{
+#    WOH[i] = as.double((woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] + woh$`Pcs in shipping plan`[i]) / woh$`Weekly Sales`[i])
+#  }
+#}
+#
+#for (i in 1:nrow(woh)) {
+#  if(woh$`Weekly Sales_OOS`[i] == 0){
+#    if(woh$`OH Days`[i] == 0){
+#      WOH_OOS[i] = "Out of Stock"
+#      }
+#    else{
+#      WOH_OOS[i] = "0 Weekly Sales"
+#    }
+#  }
+#  else{
+#    WOH_OOS[i] = (woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] + woh$`Pcs in shipping plan`[i]) / woh$`Weekly Sales_OOS`[i]
+#  }
+#}
+#
+#for (i in 1:nrow(woh)) {
+#  if(woh$`Weekly Sales_SEA`[i] == 0){
+#    if(woh$`OH Days`[i] == 0){
+#      WOH_SEA[i] = "Out of Stock"
+#    }
+#    else{
+#      WOH_SEA[i] = "0 Weekly Sales"
+#    }
+#  }
+#  else{
+#    WOH_SEA[i] = (woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] + woh$`Pcs in shipping plan`[i]) / woh$`Weekly Sales_SEA`[i]
+#  }
+#}
+#
+#for (i in 1:nrow(woh)) {
+#  if(woh$`Weekly Sales_OOS_SEA`[i] == 0){
+#    if(woh$`OH Days`[i] == 0){
+#      WOH_OOS_SEA[i] = "Out of Stock"
+#    }
+#    else{
+#      WOH_OOS_SEA[i] = "0 Weekly Sales"
+#    }
+#  }
+#  else{
+#    WOH_OOS_SEA[i] = (woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] + woh$`Pcs in shipping plan`[i]) / woh$`Weekly Sales_OOS_SEA`[i]
+#  }
+#}
+
+#WOH_OOS_SEA
+n = week
+for (i in 1:nrow(woh)) {
+  if(woh$`Weekly Sales_OOS_SEA`[i] == 0 || woh$`Last 12 WKs Sales - AMZ`[i] < 0){
+    if(woh$`OH Days`[i] == 0){
+      WOH_OOS_SEA[i] = "Out of Stock"
+    }
+    else{
+      WOH_OOS_SEA[i] = "0 Weekly Sales"}
+    }
+  else{
+    inv = woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i]
+    count = 0
+    n = week
+    growth = 0
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+      if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        while(inv > 0){
+          inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+          n = n+1
+          if(n>53){
+            n = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          count = count + 1
+        }
+        WOH_OOS_SEA[i] = count
+      }
+      else{
+        if (woh$`OH Days`[i] < 30){
+          while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+            count = count + 1
+          }
+        WOH_OOS_SEA[i] = count
+        }
+        else{
+          while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+            count = count + 1
+          }
+        WOH_OOS_SEA[i] = count  
+        }
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          while(inv > 0){
+          inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+          n = n+1
+          if(n>53){
+            n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          count = count + 1
+        }
+        WOH_OOS_SEA[i] = count
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+          while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_OOS_SEA[i] = count  
+        }
+        else{
+            while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_OOS_SEA[i] = count  
+          }
+        }
+      }
+    }
+  }
+
+#WOH_totalstock
+for (i in 1:nrow(woh)) {
+  if(woh$`Weekly Sales_OOS_SEA`[i] == 0 || woh$`Last 12 WKs Sales - AMZ`[i] < 0){
+    if(woh$`OH Days`[i] == 0){
+      WOH_totalstock[i] = "Out of Stock"
+    }
+    else{
+      WOH_totalstock[i] = "0 Weekly Sales"}
+    }
+  else{
+    inv = woh$`Total Stock`[i]
+    count = 0
+    n = week
+    growth = 0
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+      if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        while(inv > 0){
+          inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+          n = n+1
+          if(n>53){
+            n = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          count = count + 1
+        }
+        WOH_totalstock[i] = count
+      }
+      else{
+        if (woh$`OH Days`[i] < 30){
+          while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_totalstock[i] = count
+        }
+        else{
+          while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_totalstock[i] = count  
+        }
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          while(inv > 0){
+          inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+          n = n+1
+          if(n>53){
+            n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          count = count + 1
+        }
+        WOH_totalstock[i] = count
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+          while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_totalstock[i] = count  
+        }
+        else{
+            while(inv > 0){
+            inv = inv-1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_totalstock[i] = count  
+          }
+        }
+      }
+    }
+  }
+
+
+#WOS_totalstock
+for (i in 1:nrow(woh)) {
+  if(woh$`Weekly Sales_OOS_SEA`[i] == 0){
+    if(woh$`OH Days`[i] == 0){
+      WOS_totalstock[i] = "Out of Stock"
+    }
+    else{
+      WOS_totalstock[i] = "0 Weekly Sales"}
+    }
+  else{
+    WOS_totalstock[i] = as.numeric((woh$`Total Stock`[i]) / woh$`Weekly Sales_Forecast`[i])
+  }
+}
+
+#WOS
+for (i in 1:nrow(woh)) {
+  if(woh$`Weekly Sales_Forecast`[i] == 0){WOS[i] = "No Forecast"}
+  else{
+    WOS[i] = as.numeric((woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] + woh$`Pcs in shipping plan`[i]) / woh$`Weekly Sales_Forecast`[i])
+  }
+}
+
+
+woh = cbind(woh,WOH_OOS_SEA, WOS, WOH_totalstock,WOS_totalstock)
+
+newnew=which(is.na(woh$`First Receiving Date`))
+for (i in newnew){
+  woh$WOH_OOS_SEA[i] = "New New"
+  woh$WOS[i] = "New New"
+  woh$WOH_totalstock[i] = "New New"
+  woh$WOS_totalstock[i] = "New New"
+}
+```
+
+```{r}
+WOH_new_new<-rep(0,nrow(woh))
+
+woh<-woh%>%
+  left_join(cdf3, by=c("stockkey" = "StockKey"))%>%
+  rename(Yearly_forecast = `2023 Final Total QTY`)
+woh$Yearly_forecast[which(is.na(woh$Yearly_forecast))]<-0
+n = week
+for (i in 1:nrow(woh)) {
+  if(woh$`Weekly Sales_OOS_SEA`[i] == 0 || woh$`Last 12 WKs Sales - AMZ`[i] < 0){
+    if(woh$`OH Days`[i] == 0){
+      WOH_new_new[i] = "Out of Stock"
+    }
+    else{
+      WOH_new_new[i] = "0 Weekly Sales"}
+  }
+  else if(woh$Yearly_forecast[i] == 0){
+    WOH_new_new[i]="0 yearly forecast"
+  }
+  else{
+    inv = woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] 
+    count = 0
+    n = week
+    growth = 0
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+      if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        while(inv > 0){
+          inv = inv-woh$Yearly_forecast[i]*season[which(season$C32==woh$C32[i]),][n,1]
+          n = n+1
+          if(n>53){
+            n = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          count = count + 1
+        }
+        WOH_new_new[i] = count
+      }
+      else{
+        if (woh$`OH Days`[i] < 30){
+          while(inv > 0){
+            inv = inv-1.00^growth*woh$Yearly_forecast[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+            count = count + 1
+          }
+        WOH_new_new[i] = count
+        }
+        else{
+          while(inv > 0){
+            inv = inv-1.00^growth*woh$Yearly_forecast[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+            count = count + 1
+          }
+        WOH_new_new[i] = count  
+        }
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          while(inv > 0){
+          inv = inv-1.00^growth*woh$Yearly_forecast[i]*season[which(season$C32==woh$C32[i]),][n,1]
+          n = n+1
+          if(n>53){
+            n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          count = count + 1
+        }
+        WOH_new_new[i] = count
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+          while(inv > 0){
+            inv = inv-1.00^growth*woh$Yearly_forecast[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_new_new[i] = count  
+        }
+        else{
+            while(inv > 0){
+            inv = inv-1.00^growth*woh$Yearly_forecast[i]*season[which(season$C32==woh$C32[i]),][n,1]
+            n = n+1
+            if(n>53){
+              n = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+            count = count + 1
+          }
+        WOH_new_new[i] = count  
+          }
+        }
+      }
+    }
+}
+
+woh = cbind(woh,WOH_new_new)
+
+newnew=which(is.na(woh$`First Scan date`))
+for (i in newnew){
+  woh$WOH_new_new[i] = "New New"
+}
+```
+
+
+```{r}
+# `Estimated ship QTY` = rep(0,nrow(woh))
+# `Estimated reorder QTY` = rep(0,nrow(woh))
+# 
+# CNforecast_ty = sum(season[midcnty:53,2])
+# CNforecast_ny = sum(season[1:midcnny,2])
+# NonCNforecast_ty = sum(season[midnoncnty:53,2])
+# NonCNforecast_ny = sum(season[1:midnoncnny,2])
+# w = rep(0,nrow(woh))
+# 
+# for (i in 1:nrow(woh)) {
+#   if(woh$`Country of Factory`[i] == "China"){
+#   if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+#     if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * CNforecast_ty + (woh$`Non-AMZ DI_IN`[i] / 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) * 1.00 / previous_month * CNforecast_ny
+#     }
+#     else{
+#       if (woh$`OH Days`[i] < 30){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * CNforecast_ty+ (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * CNforecast_ny
+#       }
+#       else{
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * CNforecast_ty+(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * CNforecast_ny
+#       }
+#     } 
+#   }
+#   else{
+#     if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * CNforecast_ty+(woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i]) *1.00/ previous_month * CNforecast_ny
+#     }
+#     else{
+#       if(woh$`OH Days`[i] < 30){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * CNforecast_ty+(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * CNforecast_ny
+#       }
+#       else{
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * CNforecast_ty+(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * CNforecast_ny
+#       }
+#     }
+#   }
+#   }
+#   else{
+#       if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+#     if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * NonCNforecast_ty+(woh$`Non-AMZ DI_IN`[i] / 12 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i])*1.00/ previous_month * NonCNforecast_ny
+#     }
+#     else{
+#       if (woh$`OH Days`[i] < 30){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * NonCNforecast_ty+ (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * NonCNforecast_ny
+#       }
+#       else{
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * NonCNforecast_ty+(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + 0.3 * woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * NonCNforecast_ny
+#       }
+#     } 
+#   }
+#   else{
+#     if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * NonCNforecast_ty+(woh$`Non-AMZ DI_IN`[i] / 12 + woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * NonCNforecast_ny
+#     }
+#     else{
+#       if(woh$`OH Days`[i] < 30){
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * NonCNforecast_ty+(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 + woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * NonCNforecast_ny
+#       }
+#       else{
+#         w[i] = (woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + woh$`Last 12 WKs Sales - AMZ`[i]) / previous_month * NonCNforecast_ty+(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 + woh$`Last 12 WKs Sales - AMZ`[i])*1.00 / previous_month * NonCNforecast_ny
+#       }
+#     }
+#   }
+#   }
+# }
+# 
+# for (i in 1:nrow(woh)){
+#   if(woh$`Country of Factory`[i] == "China"){
+#     `Estimated ship QTY`[i] = 16*w[i]-(woh$`Sellable qty in USA`[i]+woh$`Current On Water`[i]+woh$`Pcs in shipping plan`[i]-10*woh$`Weekly Sales_OOS_SEA`[i])
+#     `Estimated reorder QTY`[i] = 16*w[i]-(woh$`Total Stock`[i]-10*woh$`Weekly Sales_OOS_SEA`[i])
+#   }
+#   else{
+#     `Estimated ship QTY`[i] = 16*w[i]-(woh$`Sellable qty in USA`[i]+woh$`Current On Water`[i]+woh$`Pcs in shipping plan`[i]-14*woh$`Weekly Sales_OOS_SEA`[i])
+#     `Estimated reorder QTY`[i] = 16*w[i]-(woh$`Total Stock`[i]-14*woh$`Weekly Sales_OOS_SEA`[i])
+#   }
+# }
+# woh = cbind(woh,`Estimated ship QTY`, `Estimated reorder QTY`)
+#Estimated Next Ship Date
+#`Estimated Next Ship Date` = rep("-",nrow(woh))
+#for (i in 1:nrow(woh)) {
+#  if(woh$`On Order`[i] > 0){
+#    `Estimated Next Ship Date`[i] = format(as.Date(DNS_date + (as.double(woh$WOH_OOS_SEA[i])-16)*7, "%Y/%m/%d"))
+#  }
+#}
+#for (i in 1:nrow(woh)) {
+#  if(is.na(`Estimated Next Ship Date`[i])){
+#    `Estimated Next Ship Date`[i] = format(as.Date(DNS_date, "%Y/%m/%d"))
+#  }
+#}
+
+
+            
+#row numbers with sales
+rownumsales = which(woh$WOH_OOS_SEA != "0 Weekly Sales" & woh$`On Order` != 0 & woh$WOH_OOS_SEA != "Out of Stock" & woh$WOH_OOS_SEA != "New New")
+#convert those have woh to number
+#wohnum = as.numeric(woh$WOH_OOS_SEA[which(woh$WOH_OOS_SEA != "0 Weekly Sales")])
+
+`Estimated Next Ship Date` = rep("-",nrow(woh))
+for (i in rownumsales){
+  if(woh$`On Order`[i] != 0){
+    if((as.numeric(DNS_date) + (as.numeric(woh$WOH_OOS_SEA[i])-16)*7) < as.numeric(DNS_date)){
+      `Estimated Next Ship Date`[i] = format(as.Date(DNS_date+months(1), "%Y/%m/%d"))
+    }
+    else{
+      `Estimated Next Ship Date`[i] = format(as.Date(DNS_date+months(1) + (as.numeric(woh$WOH_OOS_SEA[i])-16)*7))
+    }
+  }
+}
+
+woh = cbind(woh, `Estimated Next Ship Date`)
+
+`Estimated shipping qty at ship date` = rep(0,nrow(woh))
+sales = rep(0,nrow(woh))
+sales2 = rep(0,nrow(woh))
+row = which(`Estimated Next Ship Date` != "-")
+
+temp=as.numeric(woh$WOH_OOS_SEA)
+
+#calculate sales from i=1 to i=n-16+10/14 (n=woh)
+for (i in row){
+  sale1 = 0
+  num=0
+  growth = 0
+  m=week
+  if(temp[i]>16){
+  if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = (as.numeric(woh$WOH_OOS_SEA[i])-16+10)
+  }
+  else{
+    woh_1 = (as.numeric(woh$WOH_OOS_SEA[i])-16+14)
+  }
+  for (j in 1:woh_1){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          num=num+sale1
+          m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          sales[i] = num
+        }
+       
+        
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales[i] = sale1
+        }
+        else{
+
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          }
+        sales[i] = sale1 
+        
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+
+        
+        sales[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1
+          }
+        }
+    }
+  }
+  }
+  else{
+    if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = 6+10
+  }
+  else{
+    woh_1 = 6+14
+  }
+  for (j in 1:woh_1){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          sales[i] = sale1
+        }
+       
+        
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales[i] = sale1
+        }
+        else{
+
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          }
+        sales[i] = sale1 
+        
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+
+        
+        sales[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1 
+          }
+        }
+    }
+  }
+  }
+}
+
+
+
+#calculate sales from i=(n-16)+10/14 to i=n-16+26/30 (n=woh)
+for (i in row){
+  sale1 = 0
+  growth = 0
+  if(temp[i]>16){
+  if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = (as.numeric(woh$WOH_OOS_SEA[i])-16+10)
+    m=week(DNS_date+(as.numeric(woh$WOH_OOS_SEA[i])-16+10)*7)
+  }
+  else{
+    woh_1 = (as.numeric(woh$WOH_OOS_SEA[i])-16+14)
+    m=week(DNS_date+(as.numeric(woh$WOH_OOS_SEA[i])-16+14)*7)
+  }
+  
+  for (j in woh_1:(woh_1+16)){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+      if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+        m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+      
+      sales2[i] = sale1
+        }
+       
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales2[i] = sale1
+        }
+        else{
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          }
+        sales2[i] = sale1 
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+        sales2[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+        sales2[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+        sales2[i] = sale1 
+        }
+      }
+    }
+  }
+  }
+  else{
+    if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = 6+10
+    m=week(DNS_date+(as.numeric(woh$WOH_OOS_SEA[i])-16+10)*7)
+  }
+  else{
+    woh_1 = 6+14
+    m=week(DNS_date+(as.numeric(woh$WOH_OOS_SEA[i])-16+10)*7)
+  }
+  for (j in woh_1:(woh_1+16)){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          sales2[i] = sale1
+        }
+       
+        
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales2[i] = sale1
+        }
+        else{
+
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          }
+        sales2[i] = sale1 
+        
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+
+        
+        sales2[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales2[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales2[i] = sale1 
+          }
+        }
+    }
+  }
+  }
+}
+
+for (i in 1:length(sales)){
+  if(sales[i]>0){
+    sales[i] = woh$`Sellable qty in USA`[i]+woh$`Current On Water`[i]-sales[i]
+  }
+}
+
+for (i in 1:length(sales)){
+  if(sales[i]<0){
+    sales[i] = 0
+  }
+}
+
+
+`Estimated shipping qty at ship date1` = cbind(sales2,sales)
+`Estimated shipping qty at ship date` = sales2-sales
+
+
+woh<-cbind(woh, `Estimated shipping qty at ship date`)
+```
+
+
+```{r}
+#estimated reorder
+`Estimated Next Reorder Date` = rep("-",nrow(woh))
+loop = which(woh$WOH_totalstock != "0 Weekly Sales" & woh$WOH_totalstock != "Out of Stock" & woh$WOH_totalstock != "New New" )
+for (i in loop){
+    if((as.numeric(DNS_date) + (as.numeric(woh$WOH_totalstock[i])-12)*7) < as.numeric(DNS_date)){
+      `Estimated Next Reorder Date`[i] = format(as.Date(DNS_date+months(1), "%Y/%m/%d"))
+    }
+    else{
+      `Estimated Next Reorder Date`[i] = format(as.Date(DNS_date+months(1) + (as.numeric(woh$WOH_totalstock[i])-12)*7))
+    }
+}
+
+woh = cbind(woh, `Estimated Next Reorder Date`) 
+
+`Estimated reorder qty at reorder date` = rep(0,nrow(woh))
+sales = rep(0,nrow(woh))
+sales2 = rep(0,nrow(woh))
+row = which(`Estimated Next Reorder Date` != "-")
+
+temp=as.numeric(woh$WOH_totalstock)
+
+#calculate sales from i=1 to i=n-16+10/14 (n=woh)
+for (i in row){
+  sale1 = 0
+  growth = 0
+  m=week
+  if(temp[i]>20){
+  if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = (as.numeric(woh$WOH_totalstock[i])-20+10)
+  }
+  else{
+    woh_1 = (as.numeric(woh$WOH_totalstock[i])-20+14)
+  }
+  for (j in 1:woh_1){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          sales[i] = sale1
+        }
+       
+        
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales[i] = sale1
+        }
+        else{
+
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          }
+        sales[i] = sale1 
+        
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+
+        
+        sales[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1 
+          }
+        }
+    }
+  }
+  }
+  else{
+    if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = 10+10
+  }
+  else{
+    woh_1 = 10+14
+  }
+  for (j in 1:woh_1){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          sales[i] = sale1
+        }
+       
+        
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales[i] = sale1
+        }
+        else{
+
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          }
+        sales[i] = sale1 
+        
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+
+        
+        sales[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales[i] = sale1 
+          }
+        }
+    }
+  }
+  }
+}
+
+
+
+#calculate sales from i=(n-16)+10/14 to i=n-16+26/30 (n=woh)
+for (i in row){
+  sale1 = 0
+  growth = 0
+  if(temp[i]>20){
+  if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = (as.numeric(woh$WOH_totalstock[i])-20+10)
+    m=week(DNS_date+(as.numeric(woh$WOH_totalstock[i])-20+10)*7)
+  }
+  else{
+    woh_1 = (as.numeric(woh$WOH_totalstock[i])-20+14)
+    m=week(DNS_date+(as.numeric(woh$WOH_totalstock[i])-20+14)*7)
+  }
+  
+  for (j in woh_1:(woh_1+20)){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+      if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+        sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+        m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+      
+      sales2[i] = sale1
+        }
+       
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales2[i] = sale1
+        }
+        else{
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          }
+        sales2[i] = sale1 
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+        sales2[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+        sales2[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+        sales2[i] = sale1 
+        }
+      }
+    }
+  }
+  }
+  else{
+    if(woh$`Country of Factory`[i] == "China"){
+    woh_1 = 10+10
+    m=week(DNS_date+(as.numeric(woh$WOH_totalstock[i])-20+10)*7)
+  }
+  else{
+    woh_1 = 10+14
+    m=week(DNS_date+(as.numeric(woh$WOH_totalstock[i])-20+14)*7)
+  }
+  for (j in woh_1:(woh_1+20)){
+    if (woh$`AMZ DI List`[i] == "AMZ DI List"){
+    if (woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+            if(growth<2){
+              growth = growth + 1
+            }
+          }
+          sales2[i] = sale1
+        }
+       
+        
+      else{
+        if (woh$`OH Days`[i] < 30){
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          
+        sales2[i] = sale1
+        }
+        else{
+
+            sale1 = sale1 + 1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+0.3*woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+              }
+          }
+        sales2[i] = sale1 
+        
+      }
+    }
+    else{
+      if(woh$`OH Days`[i]==0 || woh$`OH Days`[i] > 72){
+          sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+          m = m+1
+          if(m>53){
+            m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+
+        
+        sales2[i] = sale1
+      }
+      else{
+        if(woh$`OH Days`[i] < 30){
+
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 5 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales2[i] = sale1  
+        }
+        else{
+            sale1 = sale1+1.00^growth*(woh$`Non-AMZ DI_IN`[i]/woh$`OH Days`[i] * 6 * 12+woh$`Last 12 WKs Sales - AMZ`[i]*12)/woh$previous_month[i]*season[which(season$C32==woh$C32[i]),][m,1]
+            m = m+1
+            if(m>53){
+              m = 1
+              if(growth<2){
+                growth = growth + 1
+              }
+            }
+          
+        sales2[i] = sale1 
+          }
+        }
+    }
+  }
+  }
+}
+
+for (i in 1:length(sales)){
+  if(sales[i]>0){
+    sales[i] = woh$`Total Stock`[i]-sales[i]
+  }
+}
+
+for (i in 1:length(sales)){
+  if(sales[i]<0){
+    sales[i] = 0
+  }
+}
+
+
+`Estimated reorder qty at reorder date` = sales2-sales
+
+
+woh<-cbind(woh, `Estimated reorder qty at reorder date`)
+```
+
+
+
+```{r,warning=FALSE}
+#productivity 
+`Jul Productivity` = rep("",nrow(woh))
+`Jul Productivity Weight` = rep("",nrow(woh))
+`Jul Productivity min_max` = rep("",nrow(woh))
+`Jul Productivity reverse min_max` = rep("",nrow(woh))
+`Jul Rank` = rep("",nrow(woh))
+`Jul Comment Productivity` = rep("",nrow(woh))
+`Jul Comment Min_Max` = rep("",nrow(woh))
+for (i in 1:nrow(woh)){
+  n=which(prod$stockkey == woh$stockkey[i])
+  if (length(n)>0){
+   `Jul Productivity`[i] = prod$`Jul Productivity`[n]
+   `Jul Productivity Weight`[i] = prod$`Jul Productivity Weight`[n]
+   `Jul Productivity min_max`[i] = prod$`Jul Productivity min_max`[n]
+   `Jul Productivity reverse min_max`[i] = prod$`Jul Productivity reverse min_max`[n]
+   `Jul Rank`[i] = prod$`Jul Rank`[n]
+   `Jul Comment Productivity`[i] = prod$`Jul Comment Productivity`[n]
+   `Jul Comment Min_Max`[i] = prod$`Jul Comment Min_Max`[n]
+  }
+} 
+
+woh = cbind(woh, `Jul Productivity`, `Jul Productivity Weight`, `Jul Productivity min_max`, `Jul Productivity reverse min_max`, `Jul Rank`, `Jul Comment Productivity`, `Jul Comment Min_Max`)
+    
+    
+    
+    
+
+#WOH is num
+`WOH_OOS_SEA Check` = rep("",nrow(woh))
+for (i in 1:nrow(woh)){
+  if(woh$WOH_OOS_SEA[i]!="0 Weekly Sales" & woh$WOH_OOS_SEA[i] != "Out of Stock"& woh$WOH_OOS_SEA[i]!="New New"){
+    `WOH_OOS_SEA Check`[i] = 1
+  }
+}
+#WOS is num
+`WOS Check` = rep("",nrow(woh))
+for (i in 1:nrow(woh)){
+  if(woh$WOS[i]!="0 Weekly Sales" & woh$WOS[i]!="NA" & woh$WOS[i] != "No Forecast"& woh$WOH_OOS_SEA[i]!="New New"){
+    `WOS Check`[i] = 1
+  }
+}
+
+woh = cbind(woh, `WOH_OOS_SEA Check`, `WOS Check`)
+#WOH/WOS check
+`All Three WOH/WOS > 52` <- rep("", nrow(woh))
+for (i in 1:nrow(woh)){
+  if(woh$`WOH_OOS_SEA Check`[i] == "1" & woh$`WOS Check`[i] == "1"){
+    if(as.numeric(woh$WOH_OOS_SEA[i]) >= 52 & as.numeric(woh$WOS[i]) >= 52){
+    `All Three WOH/WOS > 52`[i] = 1
+    }
+  }
+}
+woh = cbind(woh,`All Three WOH/WOS > 52`)
+
+#Do Not Ship
+`Do Not Ship` <- rep("", nrow(woh))
+for (i in 1:nrow(woh)){
+  if (woh$`All Three WOH/WOS > 52`[i] == 1 &&  woh$`First Receiving Date`[i] != 2023 && woh$`Weekly Sales_OOS_SEA`[i] != 0 && woh$`On Order`[i] != 0){
+    `Do Not Ship`[i] = "Do Not Ship"
+  }
+}
+woh = cbind(woh,`Do Not Ship`)
+```
+
+```{r}
+# woh = cbind(woh, `Weekly Sales_OOS_SEA (Jan-Jun 2023)`, `Weekly Sales_OOS_SEA (Jul-Dec 2023)`)
+# 
+# 
+# `Total Jan-Jun 2023 Pcs Sales`<- rep(0, nrow(woh))
+# `Total Jul-Dec 2023 Pcs Sales`<- rep(0, nrow(woh))
+# `EOM Jun 2023 Open needed`<- rep(0, nrow(woh))
+# `EOM Dec 2023 Open needed`<- rep(0, nrow(woh))
+# 
+# for (i in 1:nrow(woh)){
+#   `Total Jan-Jun 2023 Pcs Sales`[i] = woh$`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i]*25.86
+#   `Total Jul-Dec 2023 Pcs Sales`[i] = woh$`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i]*26.29
+# }
+# woh = cbind(woh,`Total Jan-Jun 2023 Pcs Sales`, `Total Jul-Dec 2023 Pcs Sales`)
+# 
+#             
+# 
+# 
+# for(i in 1:nrow(woh)){
+#   if(woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] - woh$`Total Jan-Jun 2023 Pcs Sales`[i] > woh$`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] * 16){
+#     `EOM Jun 2023 Open needed`[i] = 0
+#   }
+#   else{
+#     `EOM Jun 2023 Open needed`[i] = woh$`Weekly Sales_OOS_SEA (Jul-Dec 2023)`[i] * 16-(woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i]  - woh$`Total Jan-Jun 2023 Pcs Sales`[i])
+#   }
+# }
+# 
+# for(i in 1:nrow(woh)){
+#   if(woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] - woh$`Total Jan-Jun 2023 Pcs Sales`[i] - woh$`Total Jul-Dec 2023 Pcs Sales`[i] > woh$`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] * 16 * 1.00){
+#     `EOM Dec 2023 Open needed`[i] = 0
+#   }
+#   else{
+#     `EOM Dec 2023 Open needed`[i] = woh$`Weekly Sales_OOS_SEA (Jan-Jun 2023)`[i] * 1.00 * 16-(woh$`Sellable qty in USA`[i] + woh$`Current On Water`[i] -  woh$`Total Jan-Jun 2023 Pcs Sales`[i] - woh$`Total Jul-Dec 2023 Pcs Sales`[i])
+#   }
+# }
+# 
+# woh = cbind(woh, `EOM Jun 2023 Open needed`, `EOM Dec 2023 Open needed`)
+
+```
+
+```{r}
+# #factories finished/semi-finished
+# `Sum of Full Finished QTY`<-rep(0, nrow(woh))
+# `Sum of Full finished Amount` = rep(0, nrow(woh))
+# `Sum of Semi-finished QTY` = rep(0, nrow(woh))
+# `Sum of Semi-finished Amount` = rep(0, nrow(woh))
+# for (i in 1:nrow(woh)){
+#   n=which(woh$stockkey == factory$stock[i])
+#   `Sum of Full Finished QTY`[n] = factory$`Full Finished QTY`[i]
+#   `Sum of Full finished Amount`[n] = factory$`Full finished Amount`[i]
+#   `Sum of Semi-finished QTY`[n] = factory$`Semi-finished QTY`[i]
+#   `Sum of Semi-finished Amount`[n] = factory$`Semi-finished Amount`[i]
+# }
+# `Sum of Full Finished QTY`[is.na(`Sum of Full Finished QTY`)] <- 0
+# `Sum of Full finished Amount`[is.na(`Sum of Full finished Amount`)] <- 0
+# `Sum of Semi-finished QTY`[is.na(`Sum of Semi-finished QTY`)] <- 0
+# `Sum of Semi-finished Amount`[is.na(`Sum of Semi-finished Amount`)] <- 0
+# 
+# woh = cbind(woh, `Sum of Full Finished QTY`, `Sum of Full finished Amount`, `Sum of Semi-finished QTY`, `Sum of Semi-finished Amount`)
+# 
+# `EOM Dec 2022 Finished left`<-rep(0, nrow(woh))
+# `EOM Jun 2023 Finished left`<-rep(0, nrow(woh))
+# `EOM Dec 2023 Finished left`<-rep(0, nrow(woh))
+# `EOM Dec 2022 Finished left $`<-rep(0, nrow(woh))
+# `EOM Jun 2023 Finished left $`<-rep(0, nrow(woh))
+# `EOM Dec 2023 Finished left $`<-rep(0, nrow(woh))
+# for (i in 1:nrow(woh)){
+#   if (`Sum of Full Finished QTY`[i]-`EOM Jun 2023 Open needed`[i] >= 0 ){
+#     `EOM Jun 2023 Finished left`[i] = `Sum of Full Finished QTY`[i]-`EOM Jun 2023 Open needed`[i]
+#   }
+#   if (`Sum of Full Finished QTY`[i]-`EOM Dec 2023 Open needed`[i] >= 0 ){
+#     `EOM Dec 2023 Finished left`[i] = `Sum of Full Finished QTY`[i]-`EOM Dec 2023 Open needed`[i]
+#   }
+#   else{
+#     `EOM Jun 2023 Finished left`[i] = 0
+#     `EOM Dec 2023 Finished left`[i] = 0
+#   }
+# }
+# woh = cbind(woh, `EOM Jun 2023 Finished left`, `EOM Dec 2023 Finished left`)
+# 
+# `EOM Jun 2023 Finished left $` = dollar_format()(c(`EOM Jun 2023 Finished left` * woh$`Last First Cost`))
+# `EOM Dec 2023 Finished left $` = dollar_format()(c(`EOM Dec 2023 Finished left` * woh$`Last First Cost`))
+# 
+# woh = cbind(woh, `EOM Jun 2023 Finished left $`, `EOM Dec 2023 Finished left $`)
+# 
+# `EOM Jun 2023 Finished/Material left` = rep(0, nrow(woh))
+# `EOM Dec 2023 Finished/Material left` = rep(0, nrow(woh))
+# `EOM Jun 2023 Finished/Material left $` = rep(0, nrow(woh))
+# `EOM Dec 2023 Finished/Material left $` = rep(0, nrow(woh))
+# 
+# 
+# for (i in 1:nrow(woh)){
+#   if(woh$`Sum of Semi-finished QTY`[i] == 0){
+#     if(woh$`Sum of Full Finished QTY`[i] - woh$`EOM Jun 2023 Open needed`[i] < 0){
+#       `EOM Jun 2023 Finished/Material left`[i] = 0
+#     }
+#     else{
+#       `EOM Jun 2023 Finished/Material left`[i] = woh$`Sum of Full Finished QTY`[i] - woh$`EOM Jun 2023 Open needed`[i]
+#     }
+#   }
+#   else{
+#     if(woh$`Sum of Full Finished QTY`[i] - woh$`EOM Jun 2023 Open needed`[i] < 0){
+#       if(woh$`Sum of Full Finished QTY`[i] + woh$`Sum of Semi-finished QTY`[i]-woh$`EOM Jun 2023 Open needed`[i] < 0){
+#         `EOM Jun 2023 Finished/Material left`[i] = 0
+#       }
+#       else{
+#         `EOM Jun 2023 Finished/Material left`[i] = woh$`Sum of Full Finished QTY`[i] + woh$`Sum of Semi-finished QTY`[i]-woh$`EOM Jun 2023 Open needed`[i]
+#       }
+#     }
+#     else{
+#       `EOM Jun 2023 Finished/Material left`[i] = woh$`Sum of Full Finished QTY`[i] + woh$`Sum of Semi-finished QTY`[i]-woh$`EOM Jun 2023 Open needed`[i]
+#     }
+#   }
+# }
+# 
+# for (i in 1:nrow(woh)){
+#   if(woh$`Sum of Semi-finished QTY`[i] == 0){
+#     if(woh$`Sum of Full Finished QTY`[i] - woh$`EOM Dec 2023 Open needed`[i] < 0){
+#       `EOM Dec 2023 Finished/Material left`[i] = 0
+#     }
+#     else{
+#       `EOM Dec 2023 Finished/Material left`[i] = woh$`Sum of Full Finished QTY`[i] - woh$`EOM Dec 2023 Open needed`[i]
+#     }
+#   }
+#   else{
+#     if(woh$`Sum of Full Finished QTY`[i] - woh$`EOM Dec 2023 Open needed`[i] < 0){
+#       if(woh$`Sum of Full Finished QTY`[i] + woh$`Sum of Semi-finished QTY`[i]-woh$`EOM Dec 2023 Open needed`[i] < 0){
+#         `EOM Dec 2023 Finished/Material left`[i] = 0
+#       }
+#       else{
+#         `EOM Dec 2023 Finished/Material left`[i] = woh$`Sum of Full Finished QTY`[i] + woh$`Sum of Semi-finished QTY`[i]-woh$`EOM Dec 2023 Open needed`[i]
+#       }
+#     }
+#     else{
+#       `EOM Dec 2023 Finished/Material left`[i] = woh$`Sum of Full Finished QTY`[i] + woh$`Sum of Semi-finished QTY`[i]-woh$`EOM Dec 2023 Open needed`[i]
+#     }
+#   }
+# }
+# 
+# woh<-cbind(woh,  `EOM Jun 2023 Finished/Material left`, `EOM Dec 2023 Finished/Material left`)
+# 
+# `EOM Jun 2023 Finished/Material left $` = dollar_format()(c(`EOM Jun 2023 Finished/Material left` * woh$`Last First Cost`))
+# `EOM Dec 2023 Finished/Material left $` = dollar_format()(c(`EOM Dec 2023 Finished/Material left` * woh$`Last First Cost`))
+# woh<-cbind(woh,  `EOM Jun 2023 Finished/Material left $`, `EOM Dec 2023 Finished/Material left $`)
+
+```
+
+```{r}
+# `Factory payment term` = rep("",nrow(woh))
+# `Unpaid` = rep("",nrow(woh))
+# `Cooperation` = rep("",nrow(woh))
+# 
+# for (i in 1:nrow(woh)){
+#   n=which(woh$`Latest Factory Name` == facterms$From[i])
+#   `Factory payment term`[n] = facterms$`New terms from 1st Aug.2022`[i]
+#   `Unpaid`[n] = facterms$`Unpaid as at 4th Aug.2022`[i]
+#   `Cooperation`[n] = facterms$`Cooperation ranking`[i]
+# }
+# 
+# woh<-cbind(woh, `Factory payment term`, `Unpaid`, `Cooperation`)
+
+```
+
+
+```{r}
+#extract as excel
+write_xlsx(woh,"C:\\Users\\Yulin Pan\\Desktop\\Outdoor WOH new.xlsx")
+```
