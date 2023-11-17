@@ -9,7 +9,7 @@
    - **IMT/OIT Forecast**: Next 12 weeks HM forecast weekly sales 
    - **OH_Days**: Last 12 weeks number of days HM is on hand (>20pcs)
    - **OH**: Current US On Hand Inventory
-   - **OW**: Current US On Water Inventory + Previous month planned but not yet shipped
+   - **OW**: Current US On Water Inventory
 
 
 ## Calculations
@@ -59,8 +59,5 @@ Yulin Pan raypan0625@gmail.com
 
 ## Version History
 
-* 0.2
-    * Various bug fixes and optimizations
-    * See [commit change]() or See [release history]()
 * 0.1
     * Initial Release
