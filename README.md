@@ -7,7 +7,7 @@
    - **AMZ DI_IN Weekly Sales**: Last 12 weeks actual AMZ portal weekly sales
    - **AMZ DI_IN Weekly Forecast**: Next 12 weeks AMZ portal weekly forecast
    - **IMT/OIT Forecast**: Next 12 weeks HM forecast weekly sales 
-   - **OH_Days**: Last 12 weeks number of days HM is on hand (>20pcs)
+   - **OH_Days/Online Days**: Last 12 weeks number of days HM is on hand (>20pcs)
    - **updated_prod**: which month is the productivity score updated to, and change the productivity score included
    - **DNS_date**: Do not ship date, typically the first day of next month.
    - **Sellable qty in USA/On Hand(OH)**: sum of all available items of this product from all sources.
