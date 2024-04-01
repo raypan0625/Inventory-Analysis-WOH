@@ -63,6 +63,8 @@ These measurements provide a guideline for the estimated next ship date and next
 ### Estimated Next Reorder Date & Estimated Reorder qty at Reorder date
 These measurements provide a guideline for the estimated next reorder date and next reorder qty, making necessary preparation for factory negotiation.
 
+### [Productivity Score](https://github.com/raypan0625/Productivity-Score-Calculation)
+
 ## Authors
 
 Yulin Pan raypan0625@gmail.com
